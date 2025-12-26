@@ -1,0 +1,51 @@
+# Python
+*.pyc
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# PyTorch
+*.pth
+*.pt
+
+# Data & Results
+data/
+*.pkl
+*.pickle
+wandb/
+ms_res/
+new_ms_res/
+defense_config_results/
+record_res/
+Plot_res/
+
+# Documents
+*.pdf
+*.xlsx
+*.csv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+*.log
+
+# Temporary files
+tmp/
+temp/
+*.tmp
