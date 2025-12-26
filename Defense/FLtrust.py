@@ -70,6 +70,8 @@ def FLtrustDefense(global_model: torch.nn.Module, updates_list: list[dict], cent
             outputs = global_model(images)
             loss = criterion(outputs, labels)
             loss.backward()
+            # Gradient clipping to prevent numerical explosion
+            torch.nn.utils.clip_grad_norm_(global_model.parameters(), max_norm=1.0)
             optimizer.step()
             running_loss += loss.item()
 
@@ -90,7 +92,7 @@ def FLtrustDefense(global_model: torch.nn.Module, updates_list: list[dict], cent
     # Trust scores initialization
     TS = []
     # Numerical stability: prevent division by very small norms
-    eps = 1e-6
+    eps = 1e-3  # Increased from 1e-6 to handle convergence better
 
     for idx in range(client_number):
         # Compute trust score using cosine similarity and apply ReLU to ensure non-negativity
