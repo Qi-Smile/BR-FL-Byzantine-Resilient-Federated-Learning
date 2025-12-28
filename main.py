@@ -74,6 +74,14 @@ if __name__ == '__main__':
     # obtain the attacker index
     server_attacker_index, client_attacker_index = get_attacker_index(server_attacker_rate=server_attacker_rate,
         client_attacker_rate=client_attacker_rate, server_number=server_number, client_number=client_number)
+
+    # Create global optimizer for FLTrust (preserves state across rounds)
+    # Following official FLTrust implementation: SGD with momentum
+    fltrust_global_optimizer = None
+    if defense_method == 'FLtrust':
+        base_model_temp = base_model.to(device)
+        fltrust_global_optimizer = torch.optim.SGD(base_model_temp.parameters(), lr=0.01, momentum=0.9)
+
     column_names = []
 
     for i in range(client_number):
@@ -259,10 +267,11 @@ if __name__ == '__main__':
             global_avg_model.load_state_dict(global_state_dict)
             res_model_state_dict = FLtrustDefense(global_model=global_avg_model,
                                                 updates_list=client_send_updates,central_dataloader=central_dataset_loader, server_index=server_number,
-                                                index=range(0,client_number), lr=config['train_paras']['lr'], local_ep=local_epoch,            
-                                        criterion_name=config['train_paras']['criterion_name'], optimizer_name=config['train_paras']['optimizer_name'], 
+                                                index=range(0,client_number), lr=config['train_paras']['lr'], local_ep=local_epoch,
+                                        criterion_name=config['train_paras']['criterion_name'], optimizer_name=config['train_paras']['optimizer_name'],
                                         device=device, round_num=each_round,
-                                         fltrust_global_lr=config['train_paras']['fltrust_global_lr'])
+                                         fltrust_global_lr=config['train_paras']['fltrust_global_lr'],
+                                         global_optimizer=fltrust_global_optimizer)
             
         for server_id in range(server_number):
 

@@ -15,7 +15,7 @@ import wandb
 
 def FLtrustDefense(global_model: torch.nn.Module, updates_list: list[dict], central_dataloader, server_index,
                    index, lr, local_ep, optimizer_name, criterion_name, device, round_num,
-                    fltrust_global_lr=0.2) -> dict:
+                    fltrust_global_lr=0.2, global_optimizer=None) -> dict:
     """
     FLTrust defense mechanism implementation.
     
@@ -46,7 +46,14 @@ def FLtrustDefense(global_model: torch.nn.Module, updates_list: list[dict], cent
     global_model.to(device)
 
     # Optimizer setup
-    if optimizer_name == 'Adam':
+    # Use global_optimizer if provided (preserves state across rounds)
+    # Otherwise create fresh optimizer (backward compatibility)
+    if global_optimizer is not None:
+        optimizer = global_optimizer
+    elif optimizer_name == 'SGD':
+        # Following official FLTrust implementation: use SGD with lower LR
+        optimizer = torch.optim.SGD(global_model.parameters(), lr=0.01, momentum=0.9)
+    elif optimizer_name == 'Adam':
         optimizer = torch.optim.Adam(global_model.parameters(), lr=fltrust_global_lr)
     else:
         raise ValueError(f"Unsupported optimizer: {optimizer_name}")
@@ -61,6 +68,7 @@ def FLtrustDefense(global_model: torch.nn.Module, updates_list: list[dict], cent
     pre_model_weight = vectorize_model(pre_model)
 
     # Train the global model on the central (trusted) dataset
+    # Use same number of epochs as clients (following official implementation)
     for ep in range(local_ep):
         global_model.train()
         running_loss = 0.0
@@ -71,7 +79,7 @@ def FLtrustDefense(global_model: torch.nn.Module, updates_list: list[dict], cent
             loss = criterion(outputs, labels)
             loss.backward()
             # Gradient clipping to prevent numerical explosion
-            torch.nn.utils.clip_grad_norm_(global_model.parameters(), max_norm=1.0)
+            torch.nn.utils.clip_grad_norm_(global_model.parameters(), max_norm=0.5)
             optimizer.step()
             running_loss += loss.item()
 
@@ -103,7 +111,10 @@ def FLtrustDefense(global_model: torch.nn.Module, updates_list: list[dict], cent
         # Add eps to prevent division by very small norms (numerical stability)
         client_norm = torch.norm(group_weight_diff_list[idx])
         client_norm_safe = torch.clamp(client_norm, min=eps)
-        group_weight_diff_list[idx] = (torch.norm(global_weight_diff) / client_norm_safe) * group_weight_diff_list[idx]
+        # Limit the normalization ratio to prevent extreme amplification
+        norm_ratio = torch.norm(global_weight_diff) / client_norm_safe
+        norm_ratio = torch.clamp(norm_ratio, min=0.1, max=10.0)  # Limit to 0.1x-10x range
+        group_weight_diff_list[idx] = norm_ratio * group_weight_diff_list[idx]
 
     # Stack the client weight differences into a tensor for weighted aggregation
     group_weight_diff_list = torch.stack(group_weight_diff_list)

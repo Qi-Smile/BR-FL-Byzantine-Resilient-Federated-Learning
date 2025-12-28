@@ -70,10 +70,10 @@ fed_paras:
   
 
 train_paras:
-  # 0.001的比较好
-  fltrust_global_lr: 0.2
+  # FLTrust uses SGD with 0.01 lr (following official implementation)
+  fltrust_global_lr: 0.01
   lr: 0.001
-  optimizer_name: 'Adam'
+  optimizer_name: 'SGD'
   GPU: True
   cuda_number: 1
   epoch: 5
