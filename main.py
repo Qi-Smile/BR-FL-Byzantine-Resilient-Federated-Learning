@@ -15,6 +15,8 @@ from Defense.Krum import KrumDefense
 from Defense.FLtrust import FLtrustDefense
 from Defense.TreamMean import TreamMeanDefense
 from Defense.GeoMed import GeoMedDefense
+from Defense.CoMed import CoMedDefense
+from Defense.MultiKrum import MultiKrumDefense
 import os
 import pandas as pd
 
@@ -182,7 +184,7 @@ if __name__ == '__main__':
         global_state_dict:dict = AvgDefense(server_send_updates, index=list(range(server_number)), device=device)
 
         # 2. the clients use different defense methods to obtain the updated models state dict
-        if defense_method == 'Avg' or defense_method == 'FLtrust' or defense_method == 'Krum' or defense_method == 'GeoMed' or defense_method == 'ablation2':
+        if defense_method == 'Avg' or defense_method == 'FLtrust' or defense_method == 'Krum' or defense_method == 'GeoMed' or defense_method == 'CoMed' or defense_method == 'MultiKrum' or defense_method == 'ablation2':
             # Avg all the server models state dict
             defense_state_dict:dict = AvgDefense(server_send_updates, index=list(range(server_number)), device=device)
         
@@ -308,17 +310,17 @@ if __name__ == '__main__':
                 if defense_method == 'Avg' or defense_method == 'FedMs' or defense_method == 'ablation1':
                     res_model_state_dict = AvgDefense(client_send_updates,server_to_clients[server_id] , device)
                     if res_model_state_dict != None:
-                        server_model_list[server_id].load_state_dict(res_model_state_dict)    
+                        server_model_list[server_id].load_state_dict(res_model_state_dict)
                     else:
                         pass
                 elif defense_method == 'Krum':
                     res_model_state_dict = KrumDefense(updates_list=client_send_updates,
                                             num_attackers=(max(1,math.ceil(config['fed_paras']['client_attack_ratio']*client_number*(server_number/client_number)))),
-                                            index=server_to_clients[server_id], 
+                                            index=server_to_clients[server_id],
                                         device=device,k=config['defense_paras']['Krum_m'])
                     if res_model_state_dict != None:
                         server_model_list[server_id].load_state_dict(res_model_state_dict)
-                                
+
                 elif defense_method == 'FLtrust':
                     # res_model_state_dict = FLtrustDefense(global_model=server_model_list[server_id],
                     #                             updates_list=client_send_updates,central_dataloader=central_dataset_loader, server_index=server_id,
@@ -335,8 +337,28 @@ if __name__ == '__main__':
                     if res_model_state_dict != None:
                         server_model_list[server_id].load_state_dict(res_model_state_dict)
 
+                elif defense_method == 'CoMed':
+                    res_model_state_dict = CoMedDefense(updates_list=client_send_updates,
+                                                        index=server_to_clients[server_id],
+                                                        device=device)
+                    if res_model_state_dict != None:
+                        server_model_list[server_id].load_state_dict(res_model_state_dict)
+
+                elif defense_method == 'MultiKrum':
+                    num_clients_per_server = len(server_to_clients[server_id])
+                    num_attackers = max(1, math.ceil(config['fed_paras']['client_attack_ratio'] * num_clients_per_server))
+                    # Set m = n - f - 2 for maximum robustness
+                    m = max(1, num_clients_per_server - num_attackers - 2)
+                    res_model_state_dict = MultiKrumDefense(updates_list=client_send_updates,
+                                                            num_attackers=num_attackers,
+                                                            index=server_to_clients[server_id],
+                                                            device=device,
+                                                            m=m)
+                    if res_model_state_dict != None:
+                        server_model_list[server_id].load_state_dict(res_model_state_dict)
+
                 elif defense_method == 'Ours' or defense_method == 'ablation2':
-                    res_model_state_dict = TreamMeanDefense(client_send_updates,server_to_clients[server_id], 
+                    res_model_state_dict = TreamMeanDefense(client_send_updates,server_to_clients[server_id],
                                         trimmed_rate=trimmed_client_rate)
                     if res_model_state_dict != None:
                         server_model_list[server_id].load_state_dict(res_model_state_dict)
