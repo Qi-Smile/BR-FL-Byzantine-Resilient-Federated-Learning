@@ -77,10 +77,8 @@ if __name__ == '__main__':
 
     # Create global optimizer for FLTrust (preserves state across rounds)
     # Following official FLTrust implementation: SGD with momentum
+    # IMPORTANT: Optimizer must be created AFTER model is moved to device
     fltrust_global_optimizer = None
-    if defense_method == 'FLtrust':
-        base_model_temp = base_model.to(device)
-        fltrust_global_optimizer = torch.optim.SGD(base_model_temp.parameters(), lr=0.01, momentum=0.9)
 
     column_names = []
 
@@ -92,6 +90,11 @@ if __name__ == '__main__':
              
 
     base_model = base_model.to(device)
+
+    # Create global optimizer for FLTrust AFTER model is on device
+    if defense_method == 'FLtrust':
+        fltrust_global_optimizer = torch.optim.SGD(base_model.parameters(), lr=0.01, momentum=0.9)
+
     # for name, param in base_model.state_dict().items():
     #     print(name,param.size())
 
@@ -263,6 +266,7 @@ if __name__ == '__main__':
 
 
         if defense_method == 'FLtrust':
+            # Use deepcopy to avoid modifying base_model directly
             global_avg_model = copy.deepcopy(base_model)
             global_avg_model.load_state_dict(global_state_dict)
             res_model_state_dict = FLtrustDefense(global_model=global_avg_model,
