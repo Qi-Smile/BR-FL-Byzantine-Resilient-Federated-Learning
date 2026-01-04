@@ -172,10 +172,16 @@ def LabelFlip_train_model(model: torch.nn.Module, train_loader, epoch, device, l
     # Initialize optimizer
     if optimizer_name == 'Adam':
         optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    elif optimizer_name == 'SGD':
+        optimizer = torch.optim.SGD(model.parameters(), lr=lr, momentum=0.9)
+    else:
+        raise ValueError(f"Unsupported optimizer: {optimizer_name}")
 
     # Initialize criterion
     if criterion_name == 'CrossEntropy':
         criterion = torch.nn.CrossEntropyLoss()
+    else:
+        raise ValueError(f"Unsupported criterion: {criterion_name}")
 
     running_loss = 0.0
 

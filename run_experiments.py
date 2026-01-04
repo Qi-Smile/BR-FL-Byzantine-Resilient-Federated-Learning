@@ -14,7 +14,7 @@ import time
 from pathlib import Path
 
 # Define experiment parameters
-DEFENSE_METHODS = ['CoMed', 'MultiKrum', 'GeoMed']
+DEFENSE_METHODS = ['CoMed', 'GeoMed']
 SERVER_ATTACKS = ['Noise', 'Random', 'SignFlip', 'Backward']
 CLIENT_ATTACKS = ['Noise', 'Random', 'SignFlip', 'Backward', 'LabelFlip']
 

@@ -6,6 +6,7 @@ import wandb
 from wandb import AlertLevel
 from torch.utils.data import DataLoader
 import copy, math
+import argparse
 from Attack.Noise import NoiseAttacks
 from Attack.Random import RandomAttacks
 from Attack.SignFlip import SignFlipAttacks
@@ -23,8 +24,14 @@ import pandas as pd
 
 if __name__ == '__main__':
 
+    # Parse command line arguments
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--config', type=str, default='./config/cifar10_resnet18.yaml',
+                        help='Path to config file')
+    args = parser.parse_args()
+
     project_name = 'TON'
-    path = './config/cifar10_resnet18.yaml'
+    path = args.config
     # path = './config/mnist_mlp.yaml'
     config = load_config(path)
     
@@ -391,7 +398,17 @@ if __name__ == '__main__':
     df_acc.to_excel(res_acc_file_name, index=False)
     df_test_loss.to_excel(res_test_loss_file_name, index=False)
 
-   
+    # Write completion signal file for the parallel runner
+    signal_dir = 'signals'
+    os.makedirs(signal_dir, exist_ok=True)
+    signal_file = os.path.join(signal_dir, f"{file_name}.done")
+    with open(signal_file, 'w') as f:
+        f.write(f"gpu_id={config['train_paras']['cuda_number']}\n")
+        f.write(f"defense={defense_method}\n")
+        f.write(f"server_attack={server_attacks}\n")
+        f.write(f"client_attack={client_attacks}\n")
+        f.write(f"status=success\n")
+
     wandb.alert(
             title=runs_name,
             text="{} End of code run!".format(runs_name),
