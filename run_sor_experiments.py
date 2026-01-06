@@ -173,8 +173,7 @@ echo "Config: {config_path}" && \
 echo "Results: {get_result_dir(mc, mp)}" && \
 python main.py --config {config_path} && \
 echo "Experiment completed successfully" && \
-rm -f {config_path} || echo "Experiment failed or interrupted"; \
-exec bash'
+rm -f {config_path} || echo "Experiment failed or interrupted"'
 """
 
     subprocess.run(cmd, shell=True, executable='/bin/bash', check=True)
