@@ -11,6 +11,9 @@ from Attack.Noise import NoiseAttacks
 from Attack.Random import RandomAttacks
 from Attack.SignFlip import SignFlipAttacks
 from Attack.Backward import BackwardAttacks
+from Attack.ALIE import ALIEAttack
+from Attack.MinMax import MinMaxAttack
+from Attack.MinSum import MinSumAttack
 from Defense.Avg import AvgDefense
 from Defense.Krum import KrumDefense
 from Defense.FLtrust import FLtrustDefense
@@ -127,31 +130,62 @@ if __name__ == '__main__':
     client_send_updates: list[dict] = [copy.deepcopy(client_model_list[idx].state_dict()) for idx in range(client_number)]
 
     if defense_method == 'Ours' or defense_method == 'ablation1' or defense_method == 'ablation2':
-        
-        trimmed_client_rate = (config['fed_paras']['client_attack_ratio']) / (0.5-config['fed_paras']['server_attack_ratio'])
-        # pre_attacker_client_num = math.ceil(trimmed_client_rate * (client_number/server_number))
-        # pre_attacker_client_num = max(pre_attacker_client_num,1)
-        # trimmed_client_rate = pre_attacker_client_num / (client_number/server_number)
-        trimmed_client_rate = math.ceil(trimmed_client_rate*10)
-        trimmed_client_rate = trimmed_client_rate / 10
-        if trimmed_client_rate == 0:
-            trimmed_server_rate = config['fed_paras']['server_attack_ratio']
-        else:
-            trimmed_server_rate = (config['fed_paras']['client_attack_ratio'] / trimmed_client_rate) + config['fed_paras']['server_attack_ratio']
-        
-        if trimmed_client_rate >= 0.5:
-            raise ValueError("The client attack rate is too high!")
-        
-        if trimmed_server_rate >= 0.5:
-            raise ValueError("The server attack rate is too high!")
-        
-        print(trimmed_client_rate)
-        print(trimmed_server_rate)
+        # Check if user provided explicit alpha/beta parameters
+        use_manual_params = False
 
+        if ('defense_paras' in config and
+            'alpha' in config['defense_paras'] and
+            'beta' in config['defense_paras']):
+
+            alpha = config['defense_paras']['alpha']
+            beta = config['defense_paras']['beta']
+
+            if alpha is not None and beta is not None:
+                use_manual_params = True
+                trimmed_client_rate = alpha
+                trimmed_server_rate = beta
+                print(f"[MANUAL MODE] Using user-specified defense parameters:")
+                print(f"  alpha (trimmed_client_rate) = {trimmed_client_rate}")
+                print(f"  beta (trimmed_server_rate) = {trimmed_server_rate}")
+
+        if not use_manual_params:
+            # FALLBACK: Auto-calculate (backward compatibility)
+            print("[AUTO MODE] Auto-calculating trimmed rates from attack ratios")
+            trimmed_client_rate = (config['fed_paras']['client_attack_ratio']) / (0.5-config['fed_paras']['server_attack_ratio'])
+            # pre_attacker_client_num = math.ceil(trimmed_client_rate * (client_number/server_number))
+            # pre_attacker_client_num = max(pre_attacker_client_num,1)
+            # trimmed_client_rate = pre_attacker_client_num / (client_number/server_number)
+            trimmed_client_rate = math.ceil(trimmed_client_rate*10)
+            trimmed_client_rate = trimmed_client_rate / 10
+            if trimmed_client_rate == 0:
+                trimmed_server_rate = config['fed_paras']['server_attack_ratio']
+            else:
+                trimmed_server_rate = (config['fed_paras']['client_attack_ratio'] / trimmed_client_rate) + config['fed_paras']['server_attack_ratio']
+
+            print(f"  Calculated trimmed_client_rate = {trimmed_client_rate}")
+            print(f"  Calculated trimmed_server_rate = {trimmed_server_rate}")
+
+        # Validation (applies to both modes)
+        if trimmed_client_rate >= 0.5:
+            raise ValueError(f"The trimmed_client_rate (alpha={trimmed_client_rate}) is >= 0.5!")
+
+        if trimmed_server_rate >= 0.5:
+            raise ValueError(f"The trimmed_server_rate (beta={trimmed_server_rate}) is >= 0.5!")
+
+        # Cap at 0.4 for safety
         if trimmed_client_rate > 0.4:
+            print(f"  WARNING: Capping trimmed_client_rate from {trimmed_client_rate} to 0.4")
             trimmed_client_rate = 0.4
         if trimmed_server_rate > 0.4:
+            print(f"  WARNING: Capping trimmed_server_rate from {trimmed_server_rate} to 0.4")
             trimmed_server_rate = 0.4
+
+        # Check gamma parameter (for documentation/warning)
+        if 'defense_paras' in config and 'gamma' in config['defense_paras']:
+            gamma = config['defense_paras']['gamma']
+            if gamma != 1.0:
+                print(f"  WARNING: gamma={gamma} specified but not yet implemented.")
+                print(f"           Current code uses all servers (equivalent to gamma=1.0)")
 
 
     elif defense_method == 'FedMs':
@@ -159,9 +193,15 @@ if __name__ == '__main__':
         trimmed_server_rate = config['fed_paras']['server_attack_ratio']
         if trimmed_server_rate >= 0.5:
             raise ValueError("The server attack rate is too high!")
-            
+
         # predict_client_attacker_num =  math.ceil(client_number * trimmed_client_rate)
         # predict_server_attacker_num = math.ceil(server_number * trimmed_server_rate)
+
+    else:
+        # For other defense methods (CoMed, Krum, Avg, etc.)
+        # Set default trimmed rates for adaptive attacks (ALIE, MinMax, MinSum)
+        trimmed_client_rate = config['fed_paras']['client_attack_ratio']
+        trimmed_server_rate = config['fed_paras']['server_attack_ratio']
 
 
     # client_id = 0
@@ -188,6 +228,12 @@ if __name__ == '__main__':
 
         select_server_id, server_to_clients, update_counts = get_round_index(server_number, client_number)
 
+        # Create reverse mapping: client_id -> server_id (for adaptive attacks)
+        client_to_server = {}
+        for server_id, client_list in server_to_clients.items():
+            for client_id in client_list:
+                client_to_server[client_id] = server_id
+
         global_state_dict:dict = AvgDefense(server_send_updates, index=list(range(server_number)), device=device)
 
         # 2. the clients use different defense methods to obtain the updated models state dict
@@ -199,77 +245,207 @@ if __name__ == '__main__':
             defense_state_dict:dict = TreamMeanDefense(server_send_updates, index=list(range(server_number)),
                                               trimmed_rate=trimmed_server_rate)
         
-        # 3. conduct local training
-        for client_id in range(client_number):
+        # 3. conduct local training (TWO-PHASE for adaptive attacks)
 
-            if client_id in client_attacker_index:
-                client_model_list[client_id].load_state_dict(global_state_dict)
-                
-            else:
-                client_model_list[client_id].load_state_dict(defense_state_dict)
+        # Split clients into benign and malicious
+        benign_clients = [c for c in range(client_number) if c not in client_attacker_index]
+        malicious_clients = [c for c in range(client_number) if c in client_attacker_index]
+
+        # === PHASE 1: Train Benign Clients ===
+        for client_id in benign_clients:
+            # Load defense state dict
+            client_model_list[client_id].load_state_dict(defense_state_dict)
 
             for ep in range(local_epoch):
                 all_train_ep = ep + each_round * local_epoch
-                if client_attacks != 'LabelFlip':
-                    (client_model_list[client_id], tmp_train_loss) = normal_train_model(model=client_model_list[client_id],
-                                                        train_loader=dataset_train_loader_list[client_id], device=device, epoch=all_train_ep,
-                                                        criterion_name=config['train_paras']['criterion_name'],
-                                                        optimizer_name=config['train_paras']['optimizer_name'], lr=config['train_paras']['lr'], 
-                                                                                       )
-                    (test_acc, test_loss) = test_model(model=client_model_list[client_id], test_loader=dataset_test_loader, device=device,
-                                                        criterion_name=config['train_paras']['criterion_name'])
-                elif client_attacks == 'LabelFlip':
-                    (client_model_list[client_id], tmp_train_loss) = LabelFlip_train_model(model=client_model_list[client_id], label_flip_rate=config['attack_paras']['LabelFlipRate'], 
-                                                        train_loader=dataset_train_loader_list[client_id], device=device, epoch=all_train_ep,
-                                                        criterion_name=config['train_paras']['criterion_name'], num_classes=config['dataset_paras']['num_classes'],
-                                                        optimizer_name=config['train_paras']['optimizer_name'], lr=config['train_paras']['lr'], 
-                                                                                       )
-                    (test_acc, test_loss) = test_model(model=client_model_list[client_id], test_loader=dataset_test_loader, device=device,
-                                                        criterion_name=config['train_paras']['criterion_name'])
-                    (label_test_acc, label_test_loss) = LabelFlip_test_model(model=client_model_list[client_id], test_loader=dataset_test_loader, device=device,
-                                                        criterion_name=config['train_paras']['criterion_name'], num_classes=config['dataset_paras']['num_classes'])
-                
-                if client_id in client_attacker_index:
-                    wandb.log({'Testing Accuracy of malicious client{}'.format(client_id):test_acc,
-                                        'Testing Loss of malicious client{}'.format(client_id): test_loss, 
-                                        'Training loss of malicious client {}'.format(client_id): tmp_train_loss,
-                                        'Epoch': all_train_ep})
-                    if client_attacks == 'LabelFlip':
-                        wandb.log({'LabelFlip Testing Accuracy of malicious client{}'.format(client_id):label_test_acc,
-                                        'LabelFlip Testing Loss of malicious client{}'.format(client_id): label_test_loss,
-                                        'Epoch': all_train_ep})
-                else:
-                    wandb.log({'Testing Accuracy of benign client{}'.format(client_id):test_acc,
-                                        'Testing Loss of benign client{}'.format(client_id): test_loss, 
-                                        'Training loss of benign client {}'.format(client_id): tmp_train_loss,
-                                        'Epoch': all_train_ep})
+                # Normal training for benign clients
+                (client_model_list[client_id], tmp_train_loss) = normal_train_model(
+                    model=client_model_list[client_id],
+                    train_loader=dataset_train_loader_list[client_id],
+                    device=device,
+                    epoch=all_train_ep,
+                    criterion_name=config['train_paras']['criterion_name'],
+                    optimizer_name=config['train_paras']['optimizer_name'],
+                    lr=config['train_paras']['lr']
+                )
+                (test_acc, test_loss) = test_model(
+                    model=client_model_list[client_id],
+                    test_loader=dataset_test_loader,
+                    device=device,
+                    criterion_name=config['train_paras']['criterion_name']
+                )
+
+                wandb.log({
+                    'Testing Accuracy of benign client{}'.format(client_id): test_acc,
+                    'Testing Loss of benign client{}'.format(client_id): test_loss,
+                    'Training loss of benign client {}'.format(client_id): tmp_train_loss,
+                    'Epoch': all_train_ep
+                })
                 res_acc_list[client_id].append(test_acc)
                 res_test_loss_list[client_id].append(test_loss)
-                print('Client{}: Epoch{}: Test Loss: {:.4f}, Test Accuracy: {:.2f}%'.format(client_id, all_train_ep, test_loss, test_acc))
-        
+                print('Client{}: Epoch{}: Test Loss: {:.4f}, Test Accuracy: {:.2f}%'.format(
+                    client_id, all_train_ep, test_loss, test_acc))
+
+            # Store benign update
+            client_send_updates[client_id] = copy.deepcopy(client_model_list[client_id].state_dict())
+
+        # === PHASE 2: Train Malicious Clients ===
+        for client_id in malicious_clients:
+            # Load global state dict (attackers use undefended updates)
+            client_model_list[client_id].load_state_dict(global_state_dict)
+
+            for ep in range(local_epoch):
+                all_train_ep = ep + each_round * local_epoch
+
+                # Training based on attack type
+                if client_attacks != 'LabelFlip':
+                    (client_model_list[client_id], tmp_train_loss) = normal_train_model(
+                        model=client_model_list[client_id],
+                        train_loader=dataset_train_loader_list[client_id],
+                        device=device,
+                        epoch=all_train_ep,
+                        criterion_name=config['train_paras']['criterion_name'],
+                        optimizer_name=config['train_paras']['optimizer_name'],
+                        lr=config['train_paras']['lr']
+                    )
+                    (test_acc, test_loss) = test_model(
+                        model=client_model_list[client_id],
+                        test_loader=dataset_test_loader,
+                        device=device,
+                        criterion_name=config['train_paras']['criterion_name']
+                    )
+                elif client_attacks == 'LabelFlip':
+                    (client_model_list[client_id], tmp_train_loss) = LabelFlip_train_model(
+                        model=client_model_list[client_id],
+                        label_flip_rate=config['attack_paras']['LabelFlipRate'],
+                        train_loader=dataset_train_loader_list[client_id],
+                        device=device,
+                        epoch=all_train_ep,
+                        criterion_name=config['train_paras']['criterion_name'],
+                        num_classes=config['dataset_paras']['num_classes'],
+                        optimizer_name=config['train_paras']['optimizer_name'],
+                        lr=config['train_paras']['lr']
+                    )
+                    (test_acc, test_loss) = test_model(
+                        model=client_model_list[client_id],
+                        test_loader=dataset_test_loader,
+                        device=device,
+                        criterion_name=config['train_paras']['criterion_name']
+                    )
+                    (label_test_acc, label_test_loss) = LabelFlip_test_model(
+                        model=client_model_list[client_id],
+                        test_loader=dataset_test_loader,
+                        device=device,
+                        criterion_name=config['train_paras']['criterion_name'],
+                        num_classes=config['dataset_paras']['num_classes']
+                    )
+
+                wandb.log({
+                    'Testing Accuracy of malicious client{}'.format(client_id): test_acc,
+                    'Testing Loss of malicious client{}'.format(client_id): test_loss,
+                    'Training loss of malicious client {}'.format(client_id): tmp_train_loss,
+                    'Epoch': all_train_ep
+                })
+                if client_attacks == 'LabelFlip':
+                    wandb.log({
+                        'LabelFlip Testing Accuracy of malicious client{}'.format(client_id): label_test_acc,
+                        'LabelFlip Testing Loss of malicious client{}'.format(client_id): label_test_loss,
+                        'Epoch': all_train_ep
+                    })
+                res_acc_list[client_id].append(test_acc)
+                res_test_loss_list[client_id].append(test_loss)
+                print('Client{}: Epoch{}: Test Loss: {:.4f}, Test Accuracy: {:.2f}%'.format(
+                    client_id, all_train_ep, test_loss, test_acc))
+
         # 4. local clients upload their updates to the servers
 
-            if client_id in client_attacker_index:
-                
-                if config['attack_paras']['client_is_attack'] == True:
-                    # conduct client attacks
-                    if client_attacks == 'Noise':
-                        client_send_updates[client_id] = NoiseAttacks(client_model_list[client_id], config['attack_paras']['noise_mean'],
-                                                                        config['attack_paras']['noise_std'], device)
-                    elif client_attacks == 'Random':
-                        client_send_updates[client_id] = RandomAttacks(client_model_list[client_id], config['attack_paras']['random_lower'],
-                                                                        config['attack_paras']['random_upper'], device)
-                    elif client_attacks == 'SignFlip':
-                        client_send_updates[client_id] = SignFlipAttacks(client_model_list[client_id], old_client_model_list[client_id], config['attack_paras']['SignFlipScaleFactor'])
-                    elif client_attacks == 'Backward':
-                        client_send_updates[client_id] = BackwardAttacks(client_model_list[client_id], old_client_model_list[client_id],)
-                    elif client_attacks == 'LabelFlip':
-                        client_send_updates[client_id] = copy.deepcopy(client_model_list[client_id].state_dict())
+        # Malicious clients apply attacks
+        for client_id in malicious_clients:
+            if config['attack_paras']['client_is_attack'] == True:
+                # Check if adaptive attack
+                if client_attacks in ['ALIE', 'MinMax', 'MinSum']:
+                    # === ADAPTIVE ATTACKS ===
+
+                    # Get server assignment
+                    server_id = client_to_server[client_id]
+
+                    # Get benign clients in same server
+                    benign_clients_in_server = [
+                        c for c in server_to_clients[server_id]
+                        if c not in client_attacker_index
+                    ]
+
+                    # Get malicious clients count in this server
+                    malicious_clients_in_server = [
+                        c for c in server_to_clients[server_id]
+                        if c in client_attacker_index
+                    ]
+                    n_malicious = len(malicious_clients_in_server)
+
+                    # Extract benign updates
+                    benign_updates = [client_send_updates[c] for c in benign_clients_in_server]
+
+                    if client_attacks == 'ALIE':
+                        client_send_updates[client_id] = ALIEAttack(
+                            updates=client_model_list[client_id],
+                            benign_updates=benign_updates,
+                            n_malicious=n_malicious,
+                            trim_ratio=trimmed_client_rate,
+                            alie_direction=config['attack_paras']['alie_direction'],
+                            device=device
+                        )
+                    elif client_attacks == 'MinMax':
+                        client_send_updates[client_id] = MinMaxAttack(
+                            updates=client_model_list[client_id],
+                            benign_updates=benign_updates,
+                            num_iterations=config['attack_paras']['minmax_iterations'],
+                            learning_rate=config['attack_paras']['minmax_lr'],
+                            device=device
+                        )
+                    elif client_attacks == 'MinSum':
+                        client_send_updates[client_id] = MinSumAttack(
+                            updates=client_model_list[client_id],
+                            benign_updates=benign_updates,
+                            num_iterations=config['attack_paras']['minsum_iterations'],
+                            learning_rate=config['attack_paras']['minsum_lr'],
+                            device=device
+                        )
                 else:
-                        client_send_updates[client_id] = copy.deepcopy(client_model_list[client_id].state_dict())
+                    # === EXISTING SIMPLE ATTACKS ===
+                    if client_attacks == 'Noise':
+                        client_send_updates[client_id] = NoiseAttacks(
+                            client_model_list[client_id],
+                            config['attack_paras']['noise_mean'],
+                            config['attack_paras']['noise_std'],
+                            device
+                        )
+                    elif client_attacks == 'Random':
+                        client_send_updates[client_id] = RandomAttacks(
+                            client_model_list[client_id],
+                            config['attack_paras']['random_lower'],
+                            config['attack_paras']['random_upper'],
+                            device
+                        )
+                    elif client_attacks == 'SignFlip':
+                        client_send_updates[client_id] = SignFlipAttacks(
+                            client_model_list[client_id],
+                            old_client_model_list[client_id],
+                            config['attack_paras']['SignFlipScaleFactor']
+                        )
+                    elif client_attacks == 'Backward':
+                        client_send_updates[client_id] = BackwardAttacks(
+                            client_model_list[client_id],
+                            old_client_model_list[client_id]
+                        )
+                    elif client_attacks == 'LabelFlip':
+                        client_send_updates[client_id] = copy.deepcopy(
+                            client_model_list[client_id].state_dict()
+                        )
             else:
-                # benign client
-                client_send_updates[client_id] = copy.deepcopy(client_model_list[client_id].state_dict())
+                # Attack disabled
+                client_send_updates[client_id] = copy.deepcopy(
+                    client_model_list[client_id].state_dict()
+                )
 
         # 5. the servers receive the updates from the clients and conduct defense or attacks
 

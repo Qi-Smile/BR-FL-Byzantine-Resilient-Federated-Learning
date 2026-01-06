@@ -19,16 +19,31 @@ def get_file_name(config):
     server_attacks = config['general_paras']['server_attacks']
     client_attacks = config['general_paras']['client_attacks']
     defense_method = config['general_paras']['defense']
-    dirichlet_rate = config['fed_paras']['dirichlet_rate'] 
+    dirichlet_rate = config['fed_paras']['dirichlet_rate']
     server_attacker_rate = config['fed_paras']['server_attack_ratio']
     client_attacker_rate = config['fed_paras']['client_attack_ratio']
     # now_time = datetime.datetime.now().strftime('%Y_%m_%d_%H_%M_%S')
-    
-    runs_name = (dataset_name + '_' + model_name + '_' + server_attacks + '_'+ client_attacks + '_' 
-                + defense_method + str(dirichlet_rate) + '_'+str(server_attacker_rate)+ '_' +str(client_attacker_rate))
-    
 
-    save_file = dataset_name + '_' + model_name +'_' + defense_method + '_' + server_attacks + '_'+client_attacks +  '_'+ str(dirichlet_rate)+'_'+ str(server_attacker_rate) + '_' + str(client_attacker_rate)
+    # For Ours-type defenses, add alpha/beta/gamma prefix to filename
+    defense_str = defense_method
+
+    if defense_method in ['Ours', 'ablation1', 'ablation2']:
+        if ('defense_paras' in config and
+            'alpha' in config['defense_paras'] and
+            'beta' in config['defense_paras'] and
+            'gamma' in config['defense_paras']):
+
+            alpha = config['defense_paras']['alpha']
+            beta = config['defense_paras']['beta']
+            gamma = config['defense_paras']['gamma']
+
+            defense_str = f"{defense_method}_a{alpha}_b{beta}_g{gamma}"
+
+    runs_name = (dataset_name + '_' + model_name + '_' + server_attacks + '_'+ client_attacks + '_'
+                + defense_str + str(dirichlet_rate) + '_'+str(server_attacker_rate)+ '_' +str(client_attacker_rate))
+
+
+    save_file = dataset_name + '_' + model_name +'_' + defense_str + '_' + server_attacks + '_'+client_attacks +  '_'+ str(dirichlet_rate)+'_'+ str(server_attacker_rate) + '_' + str(client_attacker_rate)
 
     return runs_name, save_file
 
